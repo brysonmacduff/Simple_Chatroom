@@ -1,10 +1,7 @@
 import websockets
 from websockets.sync.client import ClientConnection
 from websockets import ConnectionClosedOK
-
-import threading
 from threading import Thread,Event,Lock
-from time import sleep
 from queue import Queue,Empty
 import json
 
@@ -12,12 +9,13 @@ client_id:str = None
 outbound_messages:Queue = Queue()
 
 # this thread would be the main activity thread that does something 
-def main_activity(con_event:Event,messages_lock:Lock):
-    while not con_event.is_set():
+def main_activity(cc:ClientConnection,shutdown_event:Event,messages_lock:Lock):
+    while not shutdown_event.is_set():
         message = input("") # this will hold the thread here, waiting on cli i/o
 
         if message == "-exit":
-            con_event.set()
+            shutdown_event.set()
+            cc.close()
             break
 
         messages_lock.acquire()
@@ -33,10 +31,10 @@ def main_activity(con_event:Event,messages_lock:Lock):
     
     print("main_activity(): shutting down")
 
-def send(cc:ClientConnection,con_event:Event,messages_lock:Lock):
+def send(cc:ClientConnection,shutdown_event:Event,messages_lock:Lock):
 
-    try:
-        while not con_event.is_set():
+    while not shutdown_event.is_set():
+        try:
 
             messages_lock.acquire()
 
@@ -51,36 +49,32 @@ def send(cc:ClientConnection,con_event:Event,messages_lock:Lock):
                     break # break if the queue was empty
 
             messages_lock.release()
-
-            sleep(0.1) # relinquish control of the client connection to the receive() thread
-        
-        cc.close() # when the loop exits, close the connection
-            
-    except ConnectionClosedOK:
-        print("send(): connection closed normally")
-        con_event.set()
-    except:
-        print("send(): connection closed on error")
-        con_event.set()
+                
+        except ConnectionClosedOK:
+            print("send(): connection closed ok")
+            shutdown_event.set()
+            break
+        except:
+            print("send(): connection closed on error")
+            shutdown_event.set()
+            break
 
     print("send(): shutting down.")
 
-def receive(cc:ClientConnection,con_event:Event):
+def receive(cc:ClientConnection,shutdown_event:Event):
 
-    while not con_event.is_set(): # break the loop if the client has chosen to exit from the send() thread
+    while not shutdown_event.is_set(): # break the loop if the client has chosen to exit from the send() thread
         try:
-            message = cc.recv(timeout=0.1)
-
+            # this will throw a ConnectionClosedOK error either when the server or the activity_thread closes the socket
+            message = cc.recv()
             print(message)
-        except TimeoutError:
-            sleep(0.1) # relinquish control of the client connection to the send() thread
         except ConnectionClosedOK:
-            print("receive(): connection closed by server")
-            con_event.set()
+            print("receive(): connection closed ok")
+            shutdown_event.set()
             break
         except Exception as e:
             print("receive(): connection closed on error. Error -> ",str(e))
-            con_event.set()
+            shutdown_event.set()
             break
 
     print("receive(): shutting down.")
@@ -96,16 +90,16 @@ def connect():
     intro_message = json.dumps(intro_message)
     client_con.send(intro_message)
 
-    con_event = Event()
-    messages_lock = Lock()
+    shutdown_event = Event() # used by of the three threads to signal that to the other threads to shutdown
+    messages_lock = Lock() # controls access to the messages queue
     
-    receive_thread = Thread(target=receive,args=(client_con,con_event,))
+    receive_thread = Thread(target=receive,args=(client_con,shutdown_event,))
     receive_thread.start()
 
-    send_thread = Thread(target=send,args=(client_con,con_event,messages_lock))
+    send_thread = Thread(target=send,args=(client_con,shutdown_event,messages_lock))
     send_thread.start()
 
-    activity_thread = Thread(target=main_activity,args=(con_event,messages_lock,))
+    activity_thread = Thread(target=main_activity,args=(client_con,shutdown_event,messages_lock,))
     activity_thread.start()
 
 

@@ -1,23 +1,32 @@
 import websockets
 from websockets.sync.server import ServerConnection,WebSocketServer
 from websockets import ConnectionClosedOK
-from threading import Thread,Event
+from threading import Thread,Lock
 import json
-from time import sleep
 
 connections:dict = {} # stores the list of currently connected clients
 websocket_server:WebSocketServer = None # holds the websocket server
-shutdown_event:Event = Event() # holds the global event that is used for signalling the controlled shutdown of the server
+con_lock:Lock = Lock() # used for blocking access to the connections dictionary, because more than one thread will try to access it
 
+def remove_connection(sc:ServerConnection):
+    global con_lock
+    con_lock.acquire()
+
+    global connections
+    sc_id = str(sc.id.int)
+    if sc_id in connections.keys():
+        connections.pop(sc_id)
+
+    con_lock.release()
+  
 def send(sc:ServerConnection,message:str):
     sc.send(message)
 
 def receive(sc:ServerConnection):
     global connections
-    global shutdown_event
-    while not shutdown_event.is_set(): # this loop will exit if the shutdown event is triggered
+    while True: # this loop will exit if the shutdown event is triggered
         try:
-            message = sc.recv(timeout=0.1) # this will block the thread without a timout being set, so I set a timeout
+            message = sc.recv() # this will block the thread without a timout being set
 
             # message deserialization
             message:dict = json.loads(message)
@@ -27,21 +36,16 @@ def receive(sc:ServerConnection):
 
             # broadcast message to all connected clients
             echo(message)
-        
-        except TimeoutError:
-            sleep(0.1) # relinquish control of the client connection to the send() thread
+
         except ConnectionClosedOK:
             print("receive(): connection closed ok")
-            sc_id = str(sc.id.int)
-            if sc_id in connections.keys():
-                connections.pop(sc_id)
-                break
+            remove_connection(sc)
+            break
         except:
             print("receive(): connection closed on error")
-            sc_id = str(sc.id.int)
-            if sc_id in connections.keys():
-                connections.pop(sc_id)
-                break
+            remove_connection(sc)
+            break
+            
 
     print("receive(): shutting down")
 
@@ -57,20 +61,26 @@ def echo(message:str):
 def websocket_handler(sc:ServerConnection):
     print("websocket_handler(): client connected")
 
+    global con_lock
+    con_lock.acquire()
     # save the connection to the connections list for broadcasting
     global connections
     connections[str(sc.id.int)] = sc
+    con_lock.release()
 
     receive(sc)
 
 def shutdown_server():
 
+    global con_lock
+    con_lock.acquire()
+
     global connections
     for sc in connections.keys():
         connections[sc].close()
 
-    global shutdown_event
-    shutdown_event.set() # signal receive thread to shutdown
+    con_lock.release()
+
     global websocket_server
     websocket_server.shutdown() # shutdown the websocket server
 
