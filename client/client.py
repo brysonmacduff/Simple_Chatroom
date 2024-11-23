@@ -4,6 +4,10 @@ from websockets import ConnectionClosedOK
 from threading import Thread,Event,Lock
 from queue import Queue,Empty
 import json
+import sys
+
+SERVER_HOST = "localhost"
+SERVER_PORT = 8765
 
 client_id:str = None
 outbound_messages:Queue = Queue()
@@ -80,7 +84,7 @@ def receive(cc:ClientConnection,shutdown_event:Event):
     print("receive(): shutting down.")
     
 def connect():
-    uri = "ws://localhost:8765"
+    uri = f"ws://{SERVER_HOST}:{SERVER_PORT}"
 
     client_con:ClientConnection = websockets.sync.client.connect(uri=uri)
 
@@ -102,8 +106,24 @@ def connect():
     activity_thread = Thread(target=main_activity,args=(client_con,shutdown_event,messages_lock,))
     activity_thread.start()
 
+def parse_cli_arguments(args:list) -> False:
+
+    if(len(args) < 3):
+        print("Error. Expecting 2 arguments: <SERVER HOST> <SERVER PORT>")
+        return False
+
+    global SERVER_HOST
+    global SERVER_PORT
+
+    SERVER_HOST = str(args[1])
+    SERVER_PORT = int(args[2])
+
+    return True
 
 def main():
+
+    if(not parse_cli_arguments(sys.argv)):
+        return
 
     global client_id
     client_id = input("Enter your user name: ")

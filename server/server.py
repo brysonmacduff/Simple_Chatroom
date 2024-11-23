@@ -3,6 +3,12 @@ from websockets.sync.server import ServerConnection,WebSocketServer
 from websockets import ConnectionClosedOK
 from threading import Thread,Lock
 import json
+from datetime import datetime
+import sys
+import pytz
+
+SERVER_HOST = "localhost"
+SERVER_PORT = 8765
 
 connections:dict = {} # stores the list of currently connected clients
 websocket_server:WebSocketServer = None # holds the websocket server
@@ -32,7 +38,9 @@ def receive(sc:ServerConnection):
             message:dict = json.loads(message)
             client_id = message["client_id"]
             message = message["message"]
-            message:str = f"{client_id}: {message}"
+            time_now = datetime.now(tz=pytz.utc).strftime("%Y-%m-%d %H:%M:%S %Z")
+
+            message:str = f"[{time_now}] - [{client_id}] : {message}"
 
             # broadcast message to all connected clients
             echo(message)
@@ -41,12 +49,11 @@ def receive(sc:ServerConnection):
             print("receive(): connection closed ok")
             remove_connection(sc)
             break
-        except:
-            print("receive(): connection closed on error")
+        except Exception as e:
+            print("receive(): connection closed on error:",e)
             remove_connection(sc)
             break
             
-
     print("receive(): shutting down")
 
 # this will echo the message to the clients
@@ -94,15 +101,32 @@ def input_activity():
             break
 
     print("input_activity(): shutting down")
-        
 
+def parse_cli_arguments(args:list) -> False:
+
+    if(len(args) < 3):
+        print("Error. Expecting 2 arguments: <SERVER HOST> <SERVER PORT>")
+        return False
+
+    global SERVER_HOST
+    global SERVER_PORT
+
+    SERVER_HOST = str(args[1])
+    SERVER_PORT = int(args[2])
+
+    return True
+        
 def main():
+
+    if(not parse_cli_arguments(sys.argv)):
+        return
+
     ia_thread = Thread(target=input_activity)
     ia_thread.start()
 
     global websocket_server
-    websocket_server = websockets.sync.server.serve(websocket_handler,host="localhost",port=8765)
-    print("Websocket server started on ws://localhost:8765")
+    websocket_server = websockets.sync.server.serve(websocket_handler,host=SERVER_HOST,port=SERVER_PORT)
+    print(f"Websocket server started on ws://{SERVER_HOST}:{SERVER_PORT}")
     websocket_server.serve_forever()
 
     print("main(): server has shutdown")
