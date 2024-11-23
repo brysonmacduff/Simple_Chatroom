@@ -13,12 +13,12 @@ python3 pyinstaller --onefile server.py
 
 ### Windows
 
-python pyinstaller --onefile client.py
-python pyinstaller --onefile server.py
+* python pyinstaller --onefile client.py
+* python pyinstaller --onefile server.py
 
 ## Run Instructions
 
-./server \<SERVER_HOST\> \<SERVER_PORT\>
-./client \<SERVER_HOST\> \<SERVER_PORT\>
+* ./server \<SERVER_HOST\> \<SERVER_PORT\>
+* ./client \<SERVER_HOST\> \<SERVER_PORT\>
 
 
