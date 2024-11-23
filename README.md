@@ -8,8 +8,8 @@ This is a simple CLI chatroom project that uses TCP sockets. To try it, run the 
 
 ### Linux
 
-python3 pyinstaller --onefile client.py
-python3 pyinstaller --onefile server.py
+* python3 pyinstaller --onefile client.py
+* python3 pyinstaller --onefile server.py
 
 ### Windows
 
