@@ -5,7 +5,13 @@ from threading import Thread,Lock
 import json
 from datetime import datetime
 import sys
+import os
 import pytz
+
+# include the directory above this
+sys.path.append(os.path.abspath('..'))
+
+from message_types import MessageTypes
 
 SERVER_HOST = "localhost"
 SERVER_PORT = 8765
@@ -32,18 +38,24 @@ def receive(sc:ServerConnection):
     global connections
     while True: # this loop will exit if the shutdown event is triggered
         try:
-            message = sc.recv() # this will block the thread without a timout being set
+            raw_message = sc.recv() # this will block the thread without a timout being set
 
             # message deserialization
-            message:dict = json.loads(message)
-            client_id = message["client_id"]
-            message = message["message"]
-            time_now = datetime.now(tz=pytz.utc).strftime("%Y-%m-%d %H:%M:%S %Z")
+            message_data:dict = json.loads(raw_message)
+            client_id = message_data["client_id"]
+            message_type = message_data["message_type"]
+            message = message_data["message"]
 
+            # message formatting
+            time_now = datetime.now(tz=pytz.utc).strftime("%Y-%m-%d %H:%M:%S %Z")
             message:str = f"[{time_now}] - [{client_id}] : {message}"
 
-            # broadcast message to all connected clients
-            echo(message)
+            # do not broadcast, only print heartbeats
+            if(message_type == MessageTypes.HEARTBEAT.value):
+                print(message)
+            elif(message_type == MessageTypes.CHAT.value):
+                # broadcast message to all connected clients
+                echo(message)
 
         except ConnectionClosedOK:
             print("receive(): connection closed ok")
@@ -53,7 +65,7 @@ def receive(sc:ServerConnection):
             print("receive(): connection closed on error:",e)
             remove_connection(sc)
             break
-            
+   
     print("receive(): shutting down")
 
 # this will echo the message to the clients

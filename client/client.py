@@ -5,15 +5,28 @@ from threading import Thread,Event,Lock
 from queue import Queue,Empty
 import json
 import sys
+import os
+import time
 
+# include the directory above this
+sys.path.append(os.path.abspath('..'))
+
+from message_types import MessageTypes
+
+# constants
+HEART_BEAT_INTERVAL = 5
+
+# global variables set from CLI
 SERVER_HOST = "localhost"
 SERVER_PORT = 8765
 
+# global variables
 client_id:str = None
 outbound_messages:Queue = Queue()
+messages_lock:Lock = Lock() # controls access to the outbound_messages queue
 
 # this thread would be the main activity thread that does something 
-def main_activity(cc:ClientConnection,shutdown_event:Event,messages_lock:Lock):
+def main_activity(cc:ClientConnection,shutdown_event:Event):
     while not shutdown_event.is_set():
         message = input("") # this will hold the thread here, waiting on cli i/o
 
@@ -22,27 +35,28 @@ def main_activity(cc:ClientConnection,shutdown_event:Event,messages_lock:Lock):
             cc.close()
             break
 
-        messages_lock.acquire()
-
-        global outbound_messages
-
-        message = {"client_id":client_id,"message":message}
-        message = json.dumps(message)
-
-        outbound_messages.put(item=message,block=False)
-
-        messages_lock.release()
+        queue_message(message,MessageTypes.CHAT)
     
     print("main_activity(): shutting down")
 
-def send(cc:ClientConnection,shutdown_event:Event,messages_lock:Lock):
+def queue_message(message:str,message_type:MessageTypes):
+
+    global outbound_messages, messages_lock
+    messages_lock.acquire()
+
+    message = {"client_id":client_id,"message":message,"message_type":message_type.value}
+    message = json.dumps(message)
+
+    outbound_messages.put(item=message,block=False)
+
+    messages_lock.release()
+
+def send(cc:ClientConnection,shutdown_event:Event):
 
     while not shutdown_event.is_set():
         try:
-
+            global outbound_messages, messages_lock
             messages_lock.acquire()
-
-            global outbound_messages
 
             # dequeue the pending outbound messages
             while outbound_messages.qsize() > 0:
@@ -63,7 +77,7 @@ def send(cc:ClientConnection,shutdown_event:Event,messages_lock:Lock):
             shutdown_event.set()
             break
 
-    print("send(): shutting down.")
+    print("send(): shutting down")
 
 def receive(cc:ClientConnection,shutdown_event:Event):
 
@@ -81,7 +95,16 @@ def receive(cc:ClientConnection,shutdown_event:Event):
             shutdown_event.set()
             break
 
-    print("receive(): shutting down.")
+    print("receive(): shutting down")
+
+def keep_alive(shutdown_event:Event):
+
+    while not shutdown_event.is_set(): # break out if the client has chosen to exit
+        
+        time.sleep(HEART_BEAT_INTERVAL)
+        queue_message("HEARTBEAT",MessageTypes.HEARTBEAT)
+
+    print("keep_alive: shutting down")
     
 def connect():
     uri = f"ws://{SERVER_HOST}:{SERVER_PORT}"
@@ -90,21 +113,25 @@ def connect():
 
     # send introduction message
     global client_id
-    intro_message:dict = {"client_id":client_id,"message":f"{client_id} connected"}
-    intro_message = json.dumps(intro_message)
-    client_con.send(intro_message)
+    #intro_message:dict = {"client_id":client_id,"message":f"{client_id} connected"}
+    #intro_message = json.dumps(intro_message)
+    #client_con.send(intro_message)
+
+    queue_message(f"{client_id} connected",MessageTypes.CHAT)
 
     shutdown_event = Event() # used by of the three threads to signal that to the other threads to shutdown
-    messages_lock = Lock() # controls access to the messages queue
     
-    receive_thread = Thread(target=receive,args=(client_con,shutdown_event,))
+    receive_thread = Thread(target=receive,args=(client_con,shutdown_event))
     receive_thread.start()
 
-    send_thread = Thread(target=send,args=(client_con,shutdown_event,messages_lock))
+    send_thread = Thread(target=send,args=(client_con,shutdown_event))
     send_thread.start()
 
-    activity_thread = Thread(target=main_activity,args=(client_con,shutdown_event,messages_lock,))
+    activity_thread = Thread(target=main_activity,args=(client_con,shutdown_event))
     activity_thread.start()
+
+    keep_alive_thread = Thread(target=keep_alive,args=(shutdown_event,))
+    keep_alive_thread.start()
 
 def parse_cli_arguments(args:list) -> False:
 
